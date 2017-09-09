@@ -26,7 +26,8 @@ class CategoryServiceProvider extends ServiceProvider
      */
     public function register()
     {
-        //
+        // Merge config
+        $this->mergeConfigFrom(realpath(__DIR__.'/../config/config.php'), 'rinvex.category');
     }
 
     /**
@@ -42,6 +43,11 @@ class CategoryServiceProvider extends ServiceProvider
             $this->publishes([
                 realpath(__DIR__.'/../database/migrations') => database_path('migrations'),
             ], 'migrations');
+
+            // Publish config
+            $this->publishes([
+                realpath(__DIR__.'/../config/config.php') => config_path('rinvex.category.php'),
+            ], 'config');
         }
     }
 }

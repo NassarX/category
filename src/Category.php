@@ -21,15 +21,47 @@ use Spatie\Sluggable\HasSlug;
 use Kalnoy\Nestedset\NodeTrait;
 use Spatie\Sluggable\SlugOptions;
 use Illuminate\Support\Collection;
+use Watson\Validating\ValidatingTrait;
 use Illuminate\Database\Eloquent\Model;
+use Rinvex\Cacheable\CacheableEloquent;
 use Spatie\Translatable\HasTranslations;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 
+/**
+ * Rinvex\Category\Category.
+ *
+ * @property int                                                           $id
+ * @property array                                                         $name
+ * @property string                                                        $slug
+ * @property array                                                         $description
+ * @property int                                                           $_lft
+ * @property int                                                           $_rgt
+ * @property int                                                           $parent_id
+ * @property \Carbon\Carbon                                                $created_at
+ * @property \Carbon\Carbon                                                $updated_at
+ * @property \Carbon\Carbon                                                $deleted_at
+ * @property-read \Rinvex\Category\Category                                $parent
+ * @property-read \Kalnoy\Nestedset\Collection|\Rinvex\Category\Category[] $children
+ *
+ * @method static \Illuminate\Database\Query\Builder|\Rinvex\Category\Category whereId($value)
+ * @method static \Illuminate\Database\Query\Builder|\Rinvex\Category\Category whereName($value)
+ * @method static \Illuminate\Database\Query\Builder|\Rinvex\Category\Category whereSlug($value)
+ * @method static \Illuminate\Database\Query\Builder|\Rinvex\Category\Category whereDescription($value)
+ * @method static \Illuminate\Database\Query\Builder|\Rinvex\Category\Category whereLft($value)
+ * @method static \Illuminate\Database\Query\Builder|\Rinvex\Category\Category whereRgt($value)
+ * @method static \Illuminate\Database\Query\Builder|\Rinvex\Category\Category whereParentId($value)
+ * @method static \Illuminate\Database\Query\Builder|\Rinvex\Category\Category whereCreatedAt($value)
+ * @method static \Illuminate\Database\Query\Builder|\Rinvex\Category\Category whereUpdatedAt($value)
+ * @method static \Illuminate\Database\Query\Builder|\Rinvex\Category\Category whereDeletedAt($value)
+ * @mixin \Illuminate\Database\Eloquent\Model
+ */
 class Category extends Model
 {
     use HasSlug;
     use NodeTrait;
     use HasTranslations;
+    use ValidatingTrait;
+    use CacheableEloquent;
 
     /**
      * {@inheritdoc}
@@ -46,6 +78,11 @@ class Category extends Model
     ];
 
     /**
+     * {@inheritdoc}
+     */
+    protected $observables = ['validating', 'validated'];
+
+    /**
      * The attributes that are translatable.
      *
      * @var array
@@ -56,6 +93,58 @@ class Category extends Model
     ];
 
     /**
+     * The default rules that the model will validate against.
+     *
+     * @var array
+     */
+    protected $rules = [];
+
+    /**
+     * Whether the model should throw a ValidationException if it fails validation.
+     *
+     * @var bool
+     */
+    protected $throwValidationExceptions = true;
+
+    /**
+     * Create a new Eloquent model instance.
+     *
+     * @param array $attributes
+     */
+    public function __construct(array $attributes = [])
+    {
+        parent::__construct($attributes);
+
+        $this->setTable(config('rinvex.category.tables.categories'));
+        $this->setRules([
+            'name' => 'required|string',
+            'description' => 'nullable|string',
+            'slug' => 'required|alpha_dash|unique:'.config('rinvex.category.tables.categories').',slug',
+        ]);
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public static function boot()
+    {
+        parent::boot();
+
+        if (isset(static::$dispatcher)) {
+            // Early auto generate slugs before validation
+            static::$dispatcher->listen('eloquent.validating: '.static::class, function ($model, $event) {
+                if (! $model->slug) {
+                    if ($model->exists) {
+                        $model->generateSlugOnCreate();
+                    } else {
+                        $model->generateSlugOnUpdate();
+                    }
+                }
+            });
+        }
+    }
+
+    /**
      * Get all attached models of the given class to the category.
      *
      * @param string $class
@@ -64,7 +153,43 @@ class Category extends Model
      */
     public function entries(string $class): MorphToMany
     {
-        return $this->morphedByMany($class, 'categorizable', 'categorizables', 'category_id', 'categorizable_id');
+        return $this->morphedByMany($class, 'categorizable', config('rinvex.category.tables.categorizables'), 'category_id', 'categorizable_id');
+    }
+
+    /**
+     * Set the translatable name attribute.
+     *
+     * @param string $value
+     *
+     * @return void
+     */
+    public function setNameAttribute($value)
+    {
+        $this->attributes['name'] = json_encode(! is_array($value) ? [app()->getLocale() => $value] : $value);
+    }
+
+    /**
+     * Set the translatable description attribute.
+     *
+     * @param string $value
+     *
+     * @return void
+     */
+    public function setDescriptionAttribute($value)
+    {
+        $this->attributes['description'] = ! empty($value) ? json_encode(! is_array($value) ? [app()->getLocale() => $value] : $value) : null;
+    }
+
+    /**
+     * Enforce clean slugs.
+     *
+     * @param string $value
+     *
+     * @return void
+     */
+    public function setSlugAttribute($value)
+    {
+        $this->attributes['slug'] = str_slug($value);
     }
 
     /**
@@ -75,8 +200,8 @@ class Category extends Model
     public function getSlugOptions(): SlugOptions
     {
         return SlugOptions::create()
-            ->generateSlugsFrom('name')
-            ->saveSlugsTo('slug');
+                          ->generateSlugsFrom('name')
+                          ->saveSlugsTo('slug');
     }
 
     /**
@@ -132,9 +257,7 @@ class Category extends Model
     {
         $locale = $locale ?? app()->getLocale();
 
-        return static::query()
-                     ->where("name->{$locale}", $name)
-                     ->first();
+        return static::query()->where("name->{$locale}", $name)->first();
     }
 
     /**
@@ -152,5 +275,13 @@ class Category extends Model
         return static::create([
             'name' => [$locale => $name],
         ]);
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function newEloquentBuilder($query)
+    {
+        return new EloquentBuilder($query);
     }
 }
