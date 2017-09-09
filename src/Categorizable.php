@@ -35,21 +35,19 @@ trait Categorizable
      * Register a created model event with the dispatcher.
      *
      * @param \Closure|string $callback
-     * @param int             $priority
      *
      * @return void
      */
-    abstract public static function created($callback, $priority = 0);
+    abstract public static function created($callback);
 
     /**
      * Register a deleted model event with the dispatcher.
      *
      * @param \Closure|string $callback
-     * @param int             $priority
      *
      * @return void
      */
-    abstract public static function deleted($callback, $priority = 0);
+    abstract public static function deleted($callback);
 
     /**
      * Define a polymorphic many-to-many relationship.
@@ -82,7 +80,7 @@ trait Categorizable
      */
     public function categories(): MorphToMany
     {
-        return $this->morphToMany(static::getCategoryClassName(), 'categorizable', 'categorizables', 'categorizable_id', 'category_id')->withTimestamps();
+        return $this->morphToMany(static::getCategoryClassName(), 'categorizable', config('rinvex.category.tables.categorizables'), 'categorizable_id', 'category_id')->withTimestamps();
     }
 
     /**
@@ -344,19 +342,19 @@ trait Categorizable
 
         // Array of category slugs
         if (is_array($categories) && isset($categories[0]) && is_string($categories[0])) {
-            return $this->categories->pluck('slug')->count() == count($categories)
+            return $this->categories->pluck('slug')->count() === count($categories)
                    && $this->categories->pluck('slug')->diff($categories)->isEmpty();
         }
 
         // Array of category ids
         if (is_array($categories) && isset($categories[0]) && is_int($categories[0])) {
-            return $this->categories->pluck('id')->count() == count($categories)
+            return $this->categories->pluck('id')->count() === count($categories)
                    && $this->categories->pluck('id')->diff($categories)->isEmpty();
         }
 
         // Collection of category models
         if ($categories instanceof Collection) {
-            return $this->categories->count() == $categories->count() && $this->categories->diff($categories)->isEmpty();
+            return $this->categories->count() === $categories->count() && $this->categories->diff($categories)->isEmpty();
         }
 
         return false;
@@ -373,19 +371,19 @@ trait Categorizable
     protected function setCategories($categories, string $action)
     {
         // Fix exceptional event name
-        $event = $action == 'syncWithoutDetaching' ? 'attach' : $action;
+        $event = $action === 'syncWithoutDetaching' ? 'attach' : $action;
 
         // Hydrate Categories
         $categories = static::hydrateCategories($categories)->pluck('id')->toArray();
 
         // Fire the category syncing event
-        static::$dispatcher->fire("rinvex.category.{$event}ing", [$this, $categories]);
+        static::$dispatcher->dispatch("rinvex.category.{$event}ing", [$this, $categories]);
 
         // Set categories
         $this->categories()->$action($categories);
 
         // Fire the category synced event
-        static::$dispatcher->fire("rinvex.category.{$event}ed", [$this, $categories]);
+        static::$dispatcher->dispatch("rinvex.category.{$event}ed", [$this, $categories]);
     }
 
     /**
